@@ -10,35 +10,111 @@
         html, body, #map {
             width: 100%; height: 100%; padding: 0; margin: 0;
         }
+        #addMark {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+            background-color: white;
+            padding: 10px;
+            border: 1px solid #ccc;
+            cursor: pointer;
+        }
+        #comment {
+            position: absolute;
+            top: 50px;
+            left: 10px;
+            z-index: 1000;
+            background-color: white;
+            padding: 10px;
+            border: 1px solid #ccc;
+            display: none;
+        }
     </style>
 </head>
 <body>
     <div id="map"></div>
+    <button id="addMark">Добавить метку</button>
+    <textarea id="comment" placeholder="Комментарий..."></textarea>
     <script>
         const urlParams = new URLSearchParams(window.location.search);
-        const apiKey = urlParams.get('api_key');
-        
+        const userId = urlParams.get('userId');
+
         ymaps.ready(init);
 
-        function init() {
-            var map = new ymaps.Map("map", {
+        let addingMark = false;
+        let map;
+
+        function getColor(createdAt) {
+            const now = new Date();
+            const markDate = new Date(createdAt);
+            const diffHours = (now - markDate) / 36e5;
+
+            if (diffHours < 3) return 'green';
+            if (diffHours < 6) return 'yellow';
+            if (diffHours < 12) return 'red';
+            return 'gray';
+        }
+
+        async function fetchMarks() {
+            const response = await fetch('/marks');
+            return await response.json();
+        }
+
+        async function init() {
+            map = new ymaps.Map("map", {
                 center: [55.751574, 37.573856],
                 zoom: 10
             });
 
-            map.events.add('click', function (e) {
-                var coords = e.get('coords');
-
-                var myPlacemark = new ymaps.Placemark(coords, {
+            const marks = await fetchMarks();
+            marks.forEach(mark => {
+                const color = getColor(mark.createdAt);
+                const placemark = new ymaps.Placemark([mark.coords.latitude, mark.coords.longitude], {
                     hintContent: 'Пост ГИБДД',
-                    balloonContent: 'Метка добавлена'
+                    balloonContent: mark.comment || 'новая метка '+(new Date())
+                }, {
+                    preset: 'islands#' + color + 'DotIcon'
                 });
 
-                map.geoObjects.add(myPlacemark);
+                map.geoObjects.add(placemark);
+            });
 
-                Telegram.WebApp.sendData(JSON.stringify({ coords }));
+            map.events.add('click', function (e) {
+                if (!addingMark) return;
+
+                const coords = e.get('coords');
+                const comment = document.getElementById('comment').value;
+
+                fetch('/marks', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ userId, coords: { latitude: coords[0], longitude: coords[1] }, comment })
+                })
+                .then(response => response.json())
+                .then(mark => {
+                    const color = getColor(mark.createdAt);
+                    const placemark = new ymaps.Placemark([mark.coords.latitude, mark.coords.longitude], {
+                        hintContent: 'Пост ГИБДД',
+                        balloonContent: mark.comment || 'Метка добавлена'
+                    }, {
+                        preset: 'islands#' + color + 'DotIcon'
+                    });
+
+                    map.geoObjects.add(placemark);
+                });
+
+                addingMark = false;
+                document.getElementById('comment').style.display = 'none';
             });
         }
+
+        document.getElementById('addMark').addEventListener('click', () => {
+            addingMark = true;
+            document.getElementById('comment').style.display = 'block';
+        });
 
         Telegram.WebApp.ready();
     </script>
